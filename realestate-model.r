@@ -2,7 +2,7 @@ library(purrr)
 library(progress)
 library(keras)
 
-setwd('/Users/aw/Documents/w/py/realestate-ipsum/')
+setwd('/home/aw/Documents/w/r/realestate-ipsum/')
 
 in.file <- 'dataset.csv'
 all.x.y <- read.table(in.file, skip=1, header=T, sep=',')
@@ -10,10 +10,10 @@ chars <- read.table(in.file, nrows = 1)$V1 %>%
   strsplit('') %>%
   unlist()
 
-calculation.x.y <- all.x.y[1:100000,]
+calculation.x.y <- all.x.y
 
 set.seed(1)
-num.test <- 500
+num.test <- 800
 test.idc <- sample(1:nrow(calculation.x.y), num.test)
 test.x.y <- calculation.x.y[test.idc,]
 train.x.y <- calculation.x.y[-test.idc,]
@@ -46,12 +46,16 @@ data_generator <- function(data, batch_size) {
     list(x, y)
   }
 }
-gen <- data_generator(data=train.x.y, batch_size = 128)
+gen <- data_generator(data=train.x.y, batch_size = 512)
 
 optimizer <-  optimizer_rmsprop()
 
 model <- keras_model_sequential() %>%
-  layer_lstm(128, input_shape = c(x.string.length, length(chars))) %>%
+  layer_lstm(512, input_shape = c(x.string.length, length(chars))) %>%
+  layer_dense(length(chars)) %>%
+  layer_dense(length(chars)) %>%
+  layer_dense(length(chars)) %>%
+  layer_dense(length(chars)) %>%
   layer_dense(length(chars)) %>%
   layer_dense(length(chars)) %>%
   layer_dense(length(chars)) %>%
@@ -61,13 +65,17 @@ model <- keras_model_sequential() %>%
 
 num.epochs <- 3
 model.history <- model %>%
-  fit_generator(gen, steps_per_epoch = nrow(train.x.y) / 128, epochs=num.epochs)
+  fit_generator(gen, steps_per_epoch = nrow(train.x.y) / 512, epochs=num.epochs)
+
+model.store <- '1.model'
+save_model_hdf5(model, '1.model')
+# model <- load_model_hdf5('1.model')
 
 getTestError <- function() {
   scores <- numeric()
-  pb <- txtProgressBar(min = 1, max = nrow(test.x.y), initial = 1, style=3)
+  test.progress <- progress_bar$new(total=nrow(test.x.y),format='[:bar] :percent eta: :eta')
   for (idx in 1:nrow(test.x.y)) {
-    setTxtProgressBar(pb,idx)
+    test.progress$tick()
     
     x.test.sample <- test.x.y$x[idx] %>%
       strsplit('') %>%
@@ -78,7 +86,6 @@ getTestError <- function() {
     preds <- predict(model, x.pred)
     names(preds) <- chars
     pred.score <- which(names(sort(preds, decreasing=T)) == test.x.y$y[idx])
-    if (pred.score > 30) browser()
     scores <- c(scores, pred.score)
   }
   scores
@@ -95,29 +102,43 @@ runPrediction <- function() {
     unlist()
   first.sentence <- cur.sentence
   generated <- ''
-  gen.length <- 400
+  gen.length <- 400000
   start.cat <- TRUE
   cur_char <- ''
   i <- 1
-  # pb <- txtProgressBar(min = i, max = gen.length, initial = 1, style=3)
+  pred.progress <- progress_bar$new(total=gen.length,format='[:bar] :percent eta: :eta')
   while (i < gen.length) { # | cur_char != '.') {
-    # setTxtProgressBar(pb,i)
+    pred.progress$tick()
     x.pred <- sapply(chars, function(x) as.integer(x == cur.sentence))
     x.pred <- array_reshape(x.pred, c(1, dim(x.pred)))
     
     preds <- predict(model, x.pred)
-    cur_char <- sample(chars, 1, prob=preds^3/sum(preds^3))
+    cur_char <- sample(chars, 1, prob=preds^2/sum(preds^2))
     # cur_char <- chars[next_index]
     cur.sentence <- c(cur.sentence[-1], cur_char)
+    if (cur_char == '□') {
+      cur_char <- '50'
+    } else if (cur_char == '¢') {
+      cur_char <- paste0('$', sample(1:9, 1), paste(rep('0', sample(1:5, 1)), collapse = ''))
+    }
     generated <- paste0(generated, cur_char)
     if (start.cat) {
-      cat(cur_char)
+      # cat(cur_char)
     }
     if (cur_char == '.') start.cat = TRUE
     i <- i + 1
   }
-  # close(pb)
-  cat('\n')
-  # generated
+  # cat('\n')
+  generated
 }
-runPrediction()
+pred.output <- runPrediction()
+
+pred.lines <- unlist(strsplit(substring(paste(pred.output, ' ', sep=''), 2), '\\. '))
+cap.lines <- paste(toupper(substring(pred.lines, 1, 1)),
+                   substring(pred.lines, 2),
+                   '.',
+                   sep = "")
+
+fileConn<-file(paste0('generated_', '1', '.txt'))
+writeLines(cap.lines, fileConn)
+close(fileConn)
